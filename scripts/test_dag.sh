@@ -8,7 +8,7 @@ my_bash_func(){
     CONTAINER_ID=$(docker ps | grep '^[a-z]' | awk '{print $1}' | head -n 1 | tail -n 1)
     docker exec -it $CONTAINER_ID bash -c "airflow dags trigger  $dag_id "
    
-    # "airflow tasks run $dag_id $task_id $today"
+    # "airflow tasks run $dag_id"
     
 
 }
