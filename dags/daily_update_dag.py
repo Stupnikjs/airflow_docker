@@ -7,7 +7,7 @@ from airflow.providers.google.cloud.operators.bigquery import BigQueryCreateEmpt
 from airflow import DAG
 from google.cloud import storage
 from stupnikjs.common_package.connect_mongo import load_mongo_client
-
+from stupnikjs.common_package.six_month_ago import six_month_ago_ts
 
 # Fetch the connection object by its connection ID
 
