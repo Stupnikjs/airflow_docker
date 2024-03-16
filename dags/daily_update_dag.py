@@ -49,40 +49,38 @@ def pd_df_15_best(df):
 
 def fetch_mongo_to_gc_storage_fl(**kwargs):
 
-    six_mounth_ago_unix = kwargs['logical_date']
-
+    logical_date = kwargs['logical_date']
+    six_mounth_ago = six_month_ago_ts(logical_date)
     client = load_mongo_client()
     db = client.get_database('Cluster0')
     col = db.get_collection('games_rating')
     
     projection = {'_id': False, 'summary': False, 'verified': False, 'reviewText': False, 'reviewTime': False }
-    result = col.find({'unixReviewTime': {'$lt': int(six_mounth_ago_unix.timestamp())}}, projection)
+    result = col.find({'unixReviewTime': {'$lt': six_mounth_ago}}, projection)
     
-    df = pd.DataFrame(list(result))
-    file_path = str(six_mounth_ago_unix) + '.csv'
-    df = pd_df_15_best(df)
-    df.to_csv("15best" + file_path, tempfile=True)
-    
-    # creation du fichier a partir du gc storage dans temp dir 
-    # with tempfile.TemporaryDirectory() as temp_dir:
-    
-     
-    
-    storage.blob._MAX_MULTIPART_SIZE = 5 * 1024 * 1024  # 5 MB
-    storage.blob._DEFAULT_CHUNKSIZE = 5 * 1024 * 1024  # 5 MB
-    
-    client = storage.Client()
-    bucket = client.bucket(kwargs['bucket'])
+    with tempfile.TemporaryDirectory() as temp_dir:
+        df = pd.DataFrame(list(result))
+        file_path = os.path.join(temp_dir,str(logical_date).replace(" ", "") + '.csv')
+        file_path_bucket = str(six_mounth_ago).replace(" ", "") + '.csv'
 
-    blob = bucket.blob(file_path)  # name of the object in the bucket 
-    blob.upload_from_filename(file_path)
+        df = pd_df_15_best(df)
+        df.to_csv(os.path.join(temp_dir,file_path), index=False)
+      
+        storage.blob._MAX_MULTIPART_SIZE = 5 * 1024 * 1024  # 5 MB
+        storage.blob._DEFAULT_CHUNKSIZE = 5 * 1024 * 1024  # 5 MB
+        
+        client = storage.Client()
+        bucket = client.bucket(kwargs['bucket'])
 
-    blob_url = blob.public_url
+        blob = bucket.blob(file_path_bucket)  # name of the object in the bucket 
+        blob.upload_from_filename(file_path)
 
-    bucket_file = kwargs['bucket']
-    kwargs['ti'].xcom_push(key='blob_url', value=blob_url)
-    kwargs['ti'].xcom_push(key='bucket', value=bucket_file)
-    kwargs['ti'].xcom_push(key='six_month_ago', value=str(six_mounth_ago_unix))
+        blob_url = blob.public_url
+
+        bucket_file = kwargs['bucket']
+        kwargs['ti'].xcom_push(key='blob_url', value=blob_url)
+        kwargs['ti'].xcom_push(key='bucket', value=file_path_bucket)
+        kwargs['ti'].xcom_push(key='six_month_ago', value=str(six_mounth_ago).replace(" ", ""))
     
 
         
@@ -107,41 +105,8 @@ with dag:
         dag=dag
     )
  
-
-    create_table = BigQueryCreateEmptyTableOperator(
-        task_id="create_table",
-        dataset_id=BIGQUERY_DATASET,
-        table_id=BIGQUERY_TABLE,
-        schema_fields=[
-            {"name":"avg_note", "type": "FLOAT", "mode": "NULLABLE"},
-            {"name":"game_id", "type": "INTEGER", "mode": "REQUIRED"},
-            {"name":"user_id", "type": "INTEGER", "mode": "NULLABLE"},
-            {"name":"oldest_note", "type": "INTEGER", "mode": "REQUIRED"},
-            {"name":"latest_note", "type": "INTEGER", "mode": "NULLABLE"},
-        ],
-        dag=dag
-    )
- 
-    insert_query_job = BigQueryInsertJobOperator(
-    task_id="insert_query_job",
-    configuration={
-        "query": {
-            "query": f"""
-bq query \
---location=US \
---destination_table=`{PROJECT_ID}.{BIGQUERY_DATASET}.{BIGQUERY_TABLE}` \
---use_legacy_sql=false \
---priority=batch \
---query="LOAD '{{ ti.xcom_pull(key='blob_url', task_ids='fetch_mongo_gcstorage_task') }}' INTO {BIGQUERY_DATASET}.{BIGQUERY_TABLE}"
-""",
-            "useLegacySql": False,
-            "priority": "BATCH",
-        }
-    },
-    location="US",
-    dag=dag
-)
+    insert_or_update_task = 
    
 
-    fetch_mongo_gc_storage_task >> create_table >> insert_query_job
+    fetch_mongo_gc_storage_task >> insert_or_update_task
 

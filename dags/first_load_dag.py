@@ -3,11 +3,12 @@ import tempfile
 import pandas as pd 
 import google.auth
 from airflow.operators.python_operator import PythonOperator
-from airflow.providers.google.cloud.operators.bigquery import BigQueryCreateEmptyTableOperator, BigQueryInsertJobOperator
+from airflow.providers.google.cloud.operators.bigquery import BigQueryCreateEmptyTableOperator
+from airflow.providers.google.cloud.transfers.gcs_to_bigquery import GCSToBigQueryOperator
 from airflow import DAG
 from google.cloud import storage
 from stupnikjs.common_package.connect_mongo import load_mongo_client
-
+from stupnikjs.common_package.six_month_ago import six_month_ago_ts
 
 # Fetch the connection object by its connection ID
 
@@ -47,19 +48,19 @@ def pd_df_processing(df):
 
 def fetch_mongo_to_gc_storage_fl(**kwargs):
 
-    six_mounth_ago_unix = kwargs['logical_date']
-
+    logical_date = kwargs['logical_date']
+    six_mounth_ago = six_month_ago_ts(logical_date)
     client = load_mongo_client()
     db = client.get_database('Cluster0')
     col = db.get_collection('games_rating')
     
     projection = {'_id': False, 'summary': False, 'verified': False, 'reviewText': False, 'reviewTime': False }
-    result = col.find({'unixReviewTime': {'$lt': int(six_mounth_ago_unix.timestamp())}}, projection)
+    result = col.find({'unixReviewTime': {'$lt': six_mounth_ago}}, projection)
     
     with tempfile.TemporaryDirectory() as temp_dir:
         df = pd.DataFrame(list(result))
-        file_path = os.path.join(temp_dir,str(six_mounth_ago_unix) + '.csv')
-        file_path_bucket = str(six_mounth_ago_unix) + '.csv'
+        file_path = os.path.join(temp_dir,str(logical_date).replace(" ", "") + '.csv')
+        file_path_bucket = str(six_mounth_ago).replace(" ", "") + '.csv'
 
         df = pd_df_processing(df)
         df.to_csv(os.path.join(temp_dir,file_path), index=False)
@@ -77,8 +78,8 @@ def fetch_mongo_to_gc_storage_fl(**kwargs):
 
         bucket_file = kwargs['bucket']
         kwargs['ti'].xcom_push(key='blob_url', value=blob_url)
-        kwargs['ti'].xcom_push(key='bucket', value=bucket_file)
-        kwargs['ti'].xcom_push(key='six_month_ago', value=str(six_mounth_ago_unix))
+        kwargs['ti'].xcom_push(key='bucket', value=file_path_bucket)
+        kwargs['ti'].xcom_push(key='six_month_ago', value=str(six_mounth_ago).replace(" ", ""))
     
 
         
@@ -104,7 +105,36 @@ with dag:
     )
  
 
-    create_table = BigQueryCreateEmptyTableOperator(
+    gcs_to_bq_task = GCSToBigQueryOperator(
+        task_id="gcs_to_bq_task",
+        bucket=BUCKET,
+        source_objects=["{{ ti.xcom_pull(key='bucket', task_ids='fetch_mongo_gcstorage_task') }}"],
+        source_format="CSV",
+        destination_project_dataset_table=f"{BIGQUERY_DATASET}.{BIGQUERY_TABLE}",
+        skip_leading_rows=1,
+        allow_quoted_newlines=True,
+        write_disposition="WRITE_TRUNCATE", 
+        schema_fields=[
+            {"name":"game_id", "type": "INTEGER", "mode": "REQUIRED"},
+            {"name":"avg_note", "type": "FLOAT", "mode": "NULLABLE"},
+            {"name":"user_number", "type": "INTEGER", "mode": "NULLABLE"},
+            {"name":"oldest_note", "type": "INTEGER", "mode": "REQUIRED"},
+            {"name":"latest_note", "type": "INTEGER", "mode": "NULLABLE"},
+        ],
+        dag=dag
+        )
+
+
+ 
+   
+
+    fetch_mongo_gc_storage_task >>  gcs_to_bq_task 
+
+
+
+
+"""
+create_table = BigQueryCreateEmptyTableOperator(
         task_id="create_table",
         dataset_id=BIGQUERY_DATASET,
         table_id=BIGQUERY_TABLE,
@@ -117,30 +147,4 @@ with dag:
         ],
         dag=dag
     )
- 
-    insert_query_job = BigQueryInsertJobOperator(
-    task_id="insert_query_job",
-    configuration={
-        "query": {
-            "query": f"""
-            LOAD DATA INTO `{PROJECT_ID}.{BIGQUERY_DATASET}.{BIGQUERY_TABLE}`
-            FROM '{{ ti.xcom_pull(key="blob_url", task_ids="fetch_mongo_gcstorage_task") }}'
-            (
-                game_id:column1,
-                avg_note:column1,
-                user_number:column3,
-                latest_note:column5,
-                oldest_note:column4,
-              
-            
-            )
-            """
-        }
-    },
-    location="US",
-    dag=dag
-)
-   
-
-    fetch_mongo_gc_storage_task >> create_table >> insert_query_job
-
+"""
