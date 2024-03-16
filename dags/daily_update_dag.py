@@ -27,12 +27,17 @@ def pd_df_15_best(df):
     df['average_overall'] = df.groupby(by='asin')['overall'] \
             .transform('mean')
     
+
     df['game_id'] = df['asin'] 
     df['avg_note'] = df['average_overall']
-    df['user_note'] = df['overall']
+    df['user_number'] = df.groupby('asin')['unixReviewTime'].transform('size').astype(int)
     df['latest_note'] = df.groupby('asin')['unixReviewTime'].transform('max').astype(int)
     df['oldest_note'] = df.groupby('asin')['unixReviewTime'].transform('min').astype(int)
-    
+    # find 15 best games 
+    df_best_15 = df.sort_values(by='average_overall', ascending=False).drop_duplicates('asin').head(15)
+
+
+    df_best_15
 
     to_drop = [col for col in df.columns if col not in ['game_id', 'avg_note', 'user_note', 'latest_note', 'oldest_note']]
 
@@ -105,7 +110,7 @@ with dag:
         dag=dag
     )
  
-    insert_or_update_task = 
+    insert_or_update_task = ""
    
 
     fetch_mongo_gc_storage_task >> insert_or_update_task
