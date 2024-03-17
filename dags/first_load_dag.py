@@ -1,9 +1,7 @@
 import os
 import tempfile
 import pandas as pd 
-import google.auth
 from airflow.operators.python_operator import PythonOperator
-from airflow.providers.google.cloud.operators.bigquery import BigQueryCreateEmptyTableOperator
 from airflow.providers.google.cloud.transfers.gcs_to_bigquery import GCSToBigQueryOperator
 from airflow import DAG
 from google.cloud import storage
@@ -20,8 +18,6 @@ path_to_local_home = os.environ.get("AIRFLOW_HOME", "/opt/airflow/")
 BIGQUERY_DATASET = os.environ.get("BIGQUERY_DATASET", 'datalake')
 BIGQUERY_TABLE = "video_games"
 
-
-credentials, project_id = google.auth.default()
 
 def pd_df_processing(df):
 
@@ -55,7 +51,7 @@ def fetch_mongo_to_gc_storage_fl(**kwargs):
     col = db.get_collection('games_rating')
     
     projection = {'_id': False, 'summary': False, 'verified': False, 'reviewText': False, 'reviewTime': False }
-    result = col.find({'unixReviewTime': {'$lt': six_mounth_ago}}, projection)
+    result = col.find({'unixReviewTime': {'$gt': six_mounth_ago}}, projection)
     
     with tempfile.TemporaryDirectory() as temp_dir:
         df = pd.DataFrame(list(result))

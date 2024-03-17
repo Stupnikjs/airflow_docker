@@ -1,26 +1,21 @@
 import os
 import tempfile
 import pandas as pd 
-import google.auth
 from airflow.operators.python_operator import PythonOperator
-from airflow.providers.google.cloud.operators.bigquery import BigQueryCreateEmptyTableOperator, BigQueryInsertJobOperator
 from airflow import DAG
 from google.cloud import storage
 from stupnikjs.common_package.connect_mongo import load_mongo_client
 from stupnikjs.common_package.six_month_ago import six_month_ago_ts
 
-# Fetch the connection object by its connection ID
+
 
 PROJECT_ID = os.environ.get("GCP_PROJECT_ID")
 BUCKET = os.environ.get("GCP_GCS_BUCKET")
-
 
 path_to_local_home = os.environ.get("AIRFLOW_HOME", "/opt/airflow/")
 BIGQUERY_DATASET = os.environ.get("BIGQUERY_DATASET", 'datalake')
 BIGQUERY_TABLE = "video_games"
 
-
-credentials, project_id = google.auth.default()
 
 def pd_df_15_best(df):
 
@@ -34,10 +29,9 @@ def pd_df_15_best(df):
     df['latest_note'] = df.groupby('asin')['unixReviewTime'].transform('max').astype(int)
     df['oldest_note'] = df.groupby('asin')['unixReviewTime'].transform('min').astype(int)
     # find 15 best games 
-    df_best_15 = df.sort_values(by='average_overall', ascending=False).drop_duplicates('asin').head(15)
+    print(df.columns)
+    df = df.sort_values(by='average_overall', ascending=False).drop_duplicates('asin').head(15)
 
-
-    df_best_15
 
     to_drop = [col for col in df.columns if col not in ['game_id', 'avg_note', 'user_note', 'latest_note', 'oldest_note']]
 
@@ -61,7 +55,7 @@ def fetch_mongo_to_gc_storage_fl(**kwargs):
     col = db.get_collection('games_rating')
     
     projection = {'_id': False, 'summary': False, 'verified': False, 'reviewText': False, 'reviewTime': False }
-    result = col.find({'unixReviewTime': {'$lt': six_mounth_ago}}, projection)
+    result = col.find({'unixReviewTime': {'$gt': six_mounth_ago}}, projection)
     
     with tempfile.TemporaryDirectory() as temp_dir:
         df = pd.DataFrame(list(result))
@@ -94,7 +88,7 @@ def fetch_mongo_to_gc_storage_fl(**kwargs):
 
 dag = DAG(
     'daily_update_dag',
-    # start_date=days_ago(0),
+     start_date='2023-11-21',
     # schedule_interval='0 0 * * *',
     catchup=False
 )
