@@ -1,8 +1,8 @@
 import datetime
 import calendar
 
-def six_month_ago_ts(date_datetime):
 
+def six_month_ago_ts(date_datetime):
     curr_month = date_datetime.month
     curr_day = date_datetime.day
     

@@ -1,6 +1,7 @@
 import os
 import tempfile
 import pandas as pd 
+import datetime
 from airflow.operators.python_operator import PythonOperator
 from airflow.providers.google.cloud.transfers.gcs_to_bigquery import GCSToBigQueryOperator
 from airflow import DAG
@@ -9,6 +10,11 @@ from stupnikjs.common_package.connect_mongo import load_mongo_client
 from stupnikjs.common_package.six_month_ago import six_month_ago_ts
 
 # Fetch the connection object by its connection ID
+
+start_date = datetime.date(2015, 1, 2)
+
+# Convert start_date to a datetime object with timezone information
+iso_start_date = datetime.datetime(start_date.year, start_date.month, start_date.day, 0, 0, 0, tzinfo=datetime.timezone.utc)
 
 PROJECT_ID = os.environ.get("GCP_PROJECT_ID")
 BUCKET = os.environ.get("GCP_GCS_BUCKET")
@@ -26,11 +32,13 @@ def pd_df_processing(df):
     
     df['game_id'] = df['asin'] 
     df['avg_note'] = df['average_overall']
+    df['real_date'] = df['unixReviewTime'].apply(datetime.datetime.fromtimestamp)
     df['user_number'] = df.groupby(by='asin') \
             .transform('size')
     df['latest_note'] = df.groupby('asin')['unixReviewTime'].transform('max').astype(int)
     df['oldest_note'] = df.groupby('asin')['unixReviewTime'].transform('min').astype(int)
-    
+    # df['latest_note_date'] = df['latest_note'].apply(datetime.datetime.fromtimestamp).apply(datetime.isoformat)
+    # df['oldest_note_date'] = df['oldest_note'].apply(datetime.datetime.fromtimestamp).apply(datetime.isoformat)
 
     to_drop = [col for col in df.columns if col not in ['game_id', 'avg_note', 'user_number', 'latest_note', 'oldest_note']]
 
@@ -45,14 +53,19 @@ def pd_df_processing(df):
 def fetch_mongo_to_gc_storage_fl(**kwargs):
 
     logical_date = kwargs['logical_date']
+    print(type(logical_date))
+    print(logical_date)
     six_mounth_ago = six_month_ago_ts(logical_date)
+    print(six_mounth_ago)
+    print(datetime.datetime.fromtimestamp(six_mounth_ago))
     client = load_mongo_client()
     db = client.get_database('Cluster0')
     col = db.get_collection('games_rating')
     
     projection = {'_id': False, 'summary': False, 'verified': False, 'reviewText': False, 'reviewTime': False }
-    result = col.find({'unixReviewTime': {'$gt': six_mounth_ago}}, projection)
-    
+    # result = col.find({'unixReviewTime': {'$gt': six_mounth_ago}}, projection)
+    result = col.find({}, projection)
+    print(result)
     with tempfile.TemporaryDirectory() as temp_dir:
         df = pd.DataFrame(list(result))
         file_path = os.path.join(temp_dir,str(logical_date).replace(" ", "") + '.csv')
@@ -60,7 +73,7 @@ def fetch_mongo_to_gc_storage_fl(**kwargs):
 
         df = pd_df_processing(df)
         df.to_csv(os.path.join(temp_dir,file_path), index=False)
-      
+    
         storage.blob._MAX_MULTIPART_SIZE = 5 * 1024 * 1024  # 5 MB
         storage.blob._DEFAULT_CHUNKSIZE = 5 * 1024 * 1024  # 5 MB
         
@@ -84,7 +97,7 @@ def fetch_mongo_to_gc_storage_fl(**kwargs):
 
 dag = DAG(
     'first_load_dag',
-    # start_date=days_ago(0),
+    start_date=iso_start_date,
     # schedule_interval='0 0 * * *',
     catchup=False
 )

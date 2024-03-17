@@ -88,7 +88,6 @@ def fetch_mongo_to_gc_storage_fl(**kwargs):
 
 dag = DAG(
     'daily_update_dag',
-     start_date='2023-11-21',
     # schedule_interval='0 0 * * *',
     catchup=False
 )
